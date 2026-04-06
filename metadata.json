@@ -1,0 +1,5 @@
+{
+  "name": "Kuro Reader",
+  "description": "A minimalist, high-performance web-based comic book reader with client-side decompression.",
+  "requestFramePermissions": []
+}
