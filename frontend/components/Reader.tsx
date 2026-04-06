@@ -13,7 +13,7 @@ interface ReaderProps {
 }
 
 interface ComicPageItemProps {
-  blob: Blob;
+  url: string; // Mudamos de blob para url (string base64)
   index: number;
   currentPage: number;
   readingMode: 'single' | 'scroll';
@@ -21,29 +21,12 @@ interface ComicPageItemProps {
   zoom?: number;
 }
 
-const ComicPageItem: React.FC<ComicPageItemProps> = ({ blob, index, currentPage, readingMode, filterStyle, zoom = 1 }) => {
-  const [url, setUrl] = useState<string | null>(null);
-  const isVisible = Math.abs(index - currentPage) <= 5;
+const ComicPageItem: React.FC<ComicPageItemProps> = ({ url, index, currentPage, readingMode, filterStyle, zoom = 1 }) => {
+  // A lógica de createObjectURL foi removida porque o Base64 já é a URL final.
+  // Mantemos o controle de visibilidade apenas para performance de renderização.
+  const isVisible = Math.abs(index - currentPage) <= 3;
 
-  useEffect(() => {
-    if (isVisible && !url) {
-      const newUrl = URL.createObjectURL(blob);
-      setTimeout(() => setUrl(newUrl), 0);
-    } else if (!isVisible && url) {
-      URL.revokeObjectURL(url);
-      setTimeout(() => setUrl(null), 0);
-    }
-  }, [isVisible, blob, url]);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [url]);
-
-  if (!url && !isVisible) return <div className="w-full h-screen bg-black/20 animate-pulse" />;
-  if (!url) return null;
+  if (!isVisible && readingMode === 'single') return null;
 
   return (
     <img
@@ -51,7 +34,10 @@ const ComicPageItem: React.FC<ComicPageItemProps> = ({ blob, index, currentPage,
       alt={`Page ${index + 1}`}
       className={`${readingMode === 'single' ? 'max-w-full max-h-full shadow-2xl' : 'w-full h-auto'} object-contain`}
       style={{ ...filterStyle, transform: readingMode === 'single' ? `scale(${zoom})` : undefined }}
-      loading="lazy"
+      // 'lazy' ajuda no carregamento do modo scroll
+      loading="lazy" 
+      // Desabilitamos o aviso do Next.js pois são imagens dinâmicas e locais (base64)
+      decoding="async"
     />
   );
 };
@@ -69,22 +55,22 @@ export const Reader: React.FC<ReaderProps> = ({ pages, onClose, initialPage = 0,
   const scrollRef = useRef<HTMLDivElement>(null);
   const hudTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Handle HUD visibility
   const showHud = useCallback(() => {
     setHudVisible(true);
     if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
-    hudTimeoutRef.current = setTimeout(() => {
-      if (readingMode === 'single') setHudVisible(false);
-    }, 3000);
+    
+    if (readingMode === 'single') {
+      hudTimeoutRef.current = setTimeout(() => {
+        setHudVisible(false);
+      }, 3000);
+    }
   }, [readingMode]);
 
   useEffect(() => {
-    if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
-    hudTimeoutRef.current = setTimeout(() => {
-      if (readingMode === 'single') setHudVisible(false);
-    }, 3000);
-    return () => { if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current); };
-  }, [readingMode]);
+    return () => {
+      if (hudTimeoutRef.current) clearTimeout(hudTimeoutRef.current);
+    };
+  }, []);
 
   const nextPage = useCallback(() => setCurrentPage(p => Math.min(pages.length - 1, p + 1)), [pages.length]);
   const prevPage = useCallback(() => setCurrentPage(p => Math.max(0, p - 1)), []);
@@ -99,18 +85,17 @@ export const Reader: React.FC<ReaderProps> = ({ pages, onClose, initialPage = 0,
     }
   }, []);
 
-  // Handle keyboard shortcuts
+  const handleModeChange = (mode: 'single' | 'scroll') => {
+    setReadingMode(mode);
+    showHud();
+  };
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') {
-        if (mangaMode) prevPage(); else nextPage();
-      } else if (e.key === 'ArrowLeft') {
-        if (mangaMode) nextPage(); else prevPage();
-      } else if (e.key === 'm' || e.key === 'M') {
-        setHudVisible(v => !v);
-      } else if (e.key === 'f' || e.key === 'F') {
-        toggleFullscreen();
-      }
+      if (e.key === 'ArrowRight') mangaMode ? prevPage() : nextPage();
+      else if (e.key === 'ArrowLeft') mangaMode ? nextPage() : prevPage();
+      else if (e.key === 'm' || e.key === 'M') setHudVisible(v => !v);
+      else if (e.key === 'f' || e.key === 'F') toggleFullscreen();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
@@ -123,7 +108,7 @@ export const Reader: React.FC<ReaderProps> = ({ pages, onClose, initialPage = 0,
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 bg-black z-50 overflow-hidden cursor-none select-none"
+      className="fixed inset-0 bg-[#050505] z-50 overflow-hidden select-none"
       onMouseMove={showHud}
       onClick={showHud}
       style={{ cursor: hudVisible ? 'default' : 'none' }}
@@ -145,22 +130,21 @@ export const Reader: React.FC<ReaderProps> = ({ pages, onClose, initialPage = 0,
       />
 
       {readingMode === 'single' ? (
-        <div className="w-full h-full flex items-center justify-center relative">
-          {/* Click areas for navigation */}
-          <div className="absolute inset-y-0 left-0 w-1/4 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); mangaMode ? nextPage() : prevPage(); }} />
-          <div className="absolute inset-y-0 right-0 w-1/4 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); mangaMode ? prevPage() : nextPage(); }} />
+        <div className="w-full h-full flex items-center justify-center relative p-4">
+          <div className="absolute inset-y-0 left-0 w-1/3 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); mangaMode ? nextPage() : prevPage(); }} />
+          <div className="absolute inset-y-0 right-0 w-1/3 z-10 cursor-pointer" onClick={(e) => { e.stopPropagation(); mangaMode ? prevPage() : nextPage(); }} />
 
           <AnimatePresence mode="wait">
             <motion.div
               key={currentPage}
-              initial={{ opacity: 0, x: mangaMode ? -20 : 20 }}
+              initial={{ opacity: 0, x: mangaMode ? -10 : 10 }}
               animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: mangaMode ? 20 : -20 }}
-              transition={{ duration: 0.2 }}
-              className="w-full h-full flex items-center justify-center p-4"
+              exit={{ opacity: 0, x: mangaMode ? 10 : -10 }}
+              transition={{ duration: 0.15 }}
+              className="w-full h-full flex items-center justify-center"
             >
               <ComicPageItem 
-                blob={pages[currentPage].blob}
+                url={pages[currentPage].url}
                 index={currentPage}
                 currentPage={currentPage}
                 readingMode="single"
@@ -176,31 +160,29 @@ export const Reader: React.FC<ReaderProps> = ({ pages, onClose, initialPage = 0,
           className="w-full h-full overflow-y-auto scroll-smooth bg-[#0a0a0a]"
           onScroll={(e) => {
             const target = e.currentTarget;
-            const scrollPos = target.scrollTop + target.clientHeight / 2;
+            const scrollPos = target.scrollTop + target.clientHeight / 3;
             const pageHeight = target.scrollHeight / pages.length;
             const newPage = Math.floor(scrollPos / pageHeight);
             if (newPage !== currentPage) setCurrentPage(newPage);
           }}
         >
-          <div className="max-w-3xl mx-auto flex flex-col items-center">
+          <div className="max-w-3xl mx-auto flex flex-col items-center gap-4 py-8">
             {pages.map((page, index) => (
-              <div key={index} className="w-full min-h-screen flex items-center justify-center py-2">
-                <ComicPageItem 
-                  blob={page.blob}
-                  index={index}
-                  currentPage={currentPage}
-                  readingMode="scroll"
-                  filterStyle={filterStyle}
-                />
-              </div>
+              <ComicPageItem 
+                key={index}
+                url={page.url}
+                index={index}
+                currentPage={currentPage}
+                readingMode="scroll"
+                filterStyle={filterStyle}
+              />
             ))}
           </div>
         </div>
       )}
 
-      {/* Page Indicator (Floating) */}
       {!hudVisible && (
-        <div className="fixed bottom-6 right-6 px-3 py-1 bg-black/50 backdrop-blur-md rounded-full text-[10px] font-mono text-white/60 border border-white/10">
+        <div className="fixed bottom-6 right-6 px-4 py-2 bg-black/80 backdrop-blur-md rounded-full text-[12px] font-mono text-white/80 border border-white/10">
           {currentPage + 1} / {pages.length}
         </div>
       )}

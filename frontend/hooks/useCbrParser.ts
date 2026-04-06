@@ -1,52 +1,48 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback } from 'react';
 
 export interface ComicPage {
   name: string;
-  blob: Blob;
-  url?: string;
+  url: string;
 }
 
-export function useCbrParser(onSuccess?: (pages: ComicPage[]) => void) {
+export function useCbrParser() {
   const [pages, setPages] = useState<ComicPage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const workerRef = useRef<Worker | null>(null);
 
-  useEffect(() => {
-    workerRef.current = new Worker(new URL('../workers/unrar.worker.ts', import.meta.url));
-    
-    workerRef.current.onmessage = (e) => {
-      const { type, pages: extractedPages, message } = e.data;
-      if (type === 'success') {
-        setPages(extractedPages);
-        setIsLoading(false);
-        if (onSuccess) onSuccess(extractedPages);
-      } else {
-        setError(message || 'Failed to parse comic');
-        setIsLoading(false);
-      }
-    };
-
-    return () => {
-      workerRef.current?.terminate();
-    };
-  }, [onSuccess]);
-
-  const parseFile = useCallback((file: File) => {
+  const parseFile = useCallback(async (file: File) => {
     setIsLoading(true);
     setError(null);
-    setPages([]);
-    workerRef.current?.postMessage({ file });
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const response = await fetch('http://localhost:8000/extract', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error('Falha na extração pelo servidor');
+
+      const data = await response.json();
+      const comicPages = data.pages.map((b64: string, index: number) => ({
+        name: `Page ${index}`,
+        url: b64 
+      }));
+      
+      setPages(comicPages);
+      return comicPages;
+    } catch (err: any) {
+      setError(err.message || 'Erro ao conectar com a API');
+      return null;
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
-  const clearPages = useCallback(() => {
-    pages.forEach((p) => {
-      if (p.url) URL.revokeObjectURL(p.url);
-    });
-    setPages([]);
-  }, [pages]);
+  const clearPages = useCallback(() => setPages([]), []);
 
   return { parseFile, pages, isLoading, error, clearPages };
 }
